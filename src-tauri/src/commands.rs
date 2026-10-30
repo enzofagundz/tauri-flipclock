@@ -24,7 +24,7 @@ pub fn save_settings<R: Runtime>(
     let display_changed = previous.scale != result.settings.scale
         || previous.show_seconds != result.settings.show_seconds
         || previous.show_date != result.settings.show_date;
-    if display_changed {
+    if display_changed && !state.is_fullscreen() {
         resize(&window, &state);
     }
 
@@ -43,6 +43,9 @@ pub fn set_fullscreen<R: Runtime>(
 ) -> Result<bool, String> {
     commit_fullscreen(&state, enabled, || {
         if state.window_mode() == WindowMode::Pinned {
+            if enabled {
+                resize_to_monitor(&window);
+            }
             apply_anchors(&window, state.settings().corner, enabled);
             if !enabled {
                 resize(&window, &state);
@@ -51,7 +54,13 @@ pub fn set_fullscreen<R: Runtime>(
         } else {
             window
                 .set_fullscreen(enabled)
-                .map_err(|error| error.to_string())
+                .map_err(|error| error.to_string())?;
+            if enabled {
+                resize_to_monitor(&window);
+            } else {
+                resize(&window, &state);
+            }
+            Ok(())
         }
     })
 }
@@ -81,6 +90,31 @@ fn resize<R: Runtime>(window: &WebviewWindow<R>, state: &AppState) {
     let size = state.window_size();
     if let Err(error) = window.set_size(LogicalSize::new(size.width, size.height)) {
         eprintln!("flipclock: cannot resize the window: {error}");
+    }
+}
+
+/// A layer surface keeps its requested size even when anchored to every edge,
+/// so fullscreen must resize the window to the monitor explicitly.
+fn resize_to_monitor<R: Runtime>(window: &WebviewWindow<R>) {
+    let monitor = window
+        .current_monitor()
+        .ok()
+        .flatten()
+        .or_else(|| window.primary_monitor().ok().flatten())
+        .or_else(|| {
+            window
+                .available_monitors()
+                .ok()
+                .and_then(|monitors| monitors.into_iter().next())
+        });
+    let Some(monitor) = monitor else {
+        eprintln!("flipclock: no monitor is available for fullscreen");
+        return;
+    };
+
+    let size = monitor.size().to_logical::<f64>(monitor.scale_factor());
+    if let Err(error) = window.set_size(LogicalSize::new(size.width, size.height)) {
+        eprintln!("flipclock: cannot size the fullscreen window: {error}");
     }
 }
 
