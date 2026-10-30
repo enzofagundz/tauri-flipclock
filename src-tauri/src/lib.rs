@@ -63,11 +63,11 @@ fn setup(app: &mut tauri::App) {
 /// Sizes the window and turns it into a layer surface before it is shown.
 fn apply_startup_mode(window: &WebviewWindow, state: &AppState) {
     let size = state.window_size();
-    if let Err(error) = window.set_size(LogicalSize::new(size.width, size.height)) {
-        eprintln!("flipclock: cannot size the window: {error}");
-    }
 
     if state.window_mode() != WindowMode::Pinned {
+        if let Err(error) = window.set_size(LogicalSize::new(size.width, size.height)) {
+            eprintln!("flipclock: cannot size the window: {error}");
+        }
         return;
     }
 
@@ -75,7 +75,12 @@ fn apply_startup_mode(window: &WebviewWindow, state: &AppState) {
         Ok(gtk_window) => {
             let ready = layer_shell::setup(&gtk_window);
             if ready {
-                layer_shell::apply_anchors(&gtk_window, state.settings().corner, false);
+                layer_shell::apply_geometry(
+                    &gtk_window,
+                    state.settings().corner,
+                    false,
+                    Some((size.width as i32, size.height as i32)),
+                );
             }
             ready
         }

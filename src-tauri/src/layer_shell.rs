@@ -1,6 +1,7 @@
 //! Thin adapter over `gtk-layer-shell` so the windowing backend can be replaced.
 
 use flipclock_core::settings::Corner;
+use gtk::prelude::{GtkWindowExt, WidgetExt};
 use gtk_layer_shell::{Edge, KeyboardMode, Layer, LayerShell};
 
 /// Gap between the pinned surface and the screen edges, in logical pixels.
@@ -24,6 +25,26 @@ pub fn setup(window: &gtk::ApplicationWindow) -> bool {
     window.set_keyboard_mode(KeyboardMode::OnDemand);
     window.set_exclusive_zone(0);
     true
+}
+
+/// Applies anchors and forces the surface to recompute its size.
+///
+/// gtk-layer-shell ignores the size request when the window is anchored to
+/// opposite edges, and a bare anchor change does not resize an exported
+/// surface; `resize(1, 1)` forces that recomputation. `size` is `None` in
+/// fullscreen, where the compositor owns the size.
+pub fn apply_geometry(
+    window: &gtk::ApplicationWindow,
+    corner: Corner,
+    fullscreen: bool,
+    size: Option<(i32, i32)>,
+) {
+    apply_anchors(window, corner, fullscreen);
+    match size {
+        Some((width, height)) => window.set_size_request(width, height),
+        None => window.set_size_request(-1, -1),
+    }
+    window.resize(1, 1);
 }
 
 /// Anchors the surface to `corner` with a [`MARGIN`] gap, or to every edge for

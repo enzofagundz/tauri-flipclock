@@ -24,12 +24,19 @@ pub fn save_settings<R: Runtime>(
     let display_changed = previous.scale != result.settings.scale
         || previous.show_seconds != result.settings.show_seconds
         || previous.show_date != result.settings.show_date;
-    if display_changed {
-        resize(&window, &state);
-    }
+    let corner_changed = previous.corner != result.settings.corner;
 
-    if previous.corner != result.settings.corner && state.window_mode() == WindowMode::Pinned {
-        apply_anchors(&window, result.settings.corner, state.is_fullscreen());
+    if state.window_mode() == WindowMode::Pinned {
+        if display_changed || corner_changed {
+            apply_geometry(
+                &window,
+                result.settings.corner,
+                state.is_fullscreen(),
+                pinned_size(&state, state.is_fullscreen()),
+            );
+        }
+    } else if display_changed && !state.is_fullscreen() {
+        resize(&window, &state);
     }
 
     Ok(result)
@@ -43,14 +50,28 @@ pub fn set_fullscreen<R: Runtime>(
 ) -> Result<bool, String> {
     commit_fullscreen(&state, enabled, || {
         if state.window_mode() == WindowMode::Pinned {
-            apply_anchors(&window, state.settings().corner, enabled);
-            if !enabled {
-                resize(&window, &state);
-            }
+            apply_geometry(
+                &window,
+                state.settings().corner,
+                enabled,
+                pinned_size(&state, enabled),
+            );
             Ok(())
+        } else if enabled {
+            // A non-resizable GTK window ignores the fullscreen request.
+            window
+                .set_resizable(true)
+                .map_err(|error| error.to_string())?;
+            window
+                .set_fullscreen(true)
+                .map_err(|error| error.to_string())
         } else {
             window
-                .set_fullscreen(enabled)
+                .set_fullscreen(false)
+                .map_err(|error| error.to_string())?;
+            resize(&window, &state);
+            window
+                .set_resizable(false)
                 .map_err(|error| error.to_string())
         }
     })
@@ -95,16 +116,30 @@ fn gtk_window<R: Runtime>(window: &WebviewWindow<R>) -> Option<gtk::ApplicationW
 }
 
 /// Layer-shell calls must run on the GTK main thread; a command may not.
-fn apply_anchors<R: Runtime>(window: &WebviewWindow<R>, corner: Corner, fullscreen: bool) {
+fn apply_geometry<R: Runtime>(
+    window: &WebviewWindow<R>,
+    corner: Corner,
+    fullscreen: bool,
+    size: Option<(i32, i32)>,
+) {
     let window = window.clone();
     let scheduled = window.clone().run_on_main_thread(move || {
         if let Some(gtk_window) = gtk_window(&window) {
-            layer_shell::apply_anchors(&gtk_window, corner, fullscreen);
+            layer_shell::apply_geometry(&gtk_window, corner, fullscreen, size);
         }
     });
     if let Err(error) = scheduled {
         eprintln!("flipclock: cannot schedule the layer-shell update: {error}");
     }
+}
+
+/// The compositor owns the size in fullscreen; otherwise it is the clock size.
+fn pinned_size(state: &AppState, fullscreen: bool) -> Option<(i32, i32)> {
+    if fullscreen {
+        return None;
+    }
+    let size = state.window_size();
+    Some((size.width as i32, size.height as i32))
 }
 
 #[cfg(test)]
