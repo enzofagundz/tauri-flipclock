@@ -1,0 +1,9 @@
+# Agent config and skills — local only
+AGENTS.md
+CLAUDE.md
+docs/agents/
+.agents/
+.claude/
+.hermes/
+.opencode/
+skills-lock.json
