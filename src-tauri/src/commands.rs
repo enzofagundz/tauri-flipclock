@@ -64,7 +64,10 @@ pub fn set_fullscreen<R: Runtime>(
                 .map_err(|error| error.to_string())?;
             window
                 .set_fullscreen(true)
-                .map_err(|error| error.to_string())
+                .map_err(|error| error.to_string())?;
+            // Safety net for a compositor that keeps the old surface size.
+            resize_to_monitor(&window);
+            Ok(())
         } else {
             window
                 .set_fullscreen(false)
@@ -102,6 +105,33 @@ fn resize<R: Runtime>(window: &WebviewWindow<R>, state: &AppState) {
     let size = state.window_size();
     if let Err(error) = window.set_size(LogicalSize::new(size.width, size.height)) {
         eprintln!("flipclock: cannot resize the window: {error}");
+    }
+}
+
+/// Sizes the window to the monitor it sits on.
+///
+/// Used after a fullscreen request as a fallback: some compositors keep the old
+/// surface size when the window itself refuses to become fullscreen.
+fn resize_to_monitor<R: Runtime>(window: &WebviewWindow<R>) {
+    let monitor = window
+        .current_monitor()
+        .ok()
+        .flatten()
+        .or_else(|| window.primary_monitor().ok().flatten())
+        .or_else(|| {
+            window
+                .available_monitors()
+                .ok()
+                .and_then(|monitors| monitors.into_iter().next())
+        });
+    let Some(monitor) = monitor else {
+        eprintln!("flipclock: no monitor is available for fullscreen");
+        return;
+    };
+
+    let size = monitor.size().to_logical::<f64>(monitor.scale_factor());
+    if let Err(error) = window.set_size(LogicalSize::new(size.width, size.height)) {
+        eprintln!("flipclock: cannot size the fullscreen window: {error}");
     }
 }
 
