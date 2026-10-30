@@ -1,0 +1,3 @@
+# Use layer-shell for pinned mode
+
+COSMIC on Wayland ignores the always-on-top request of ordinary Tauri/GTK windows, and XWayland does not reliably honor `_NET_WM_STATE_ABOVE` there either. The only dependable way to keep the widget above other windows is a `wlr-layer-shell` surface on the overlay layer, anchored to a screen corner. Pinned mode therefore uses gtk-layer-shell, while windowed mode remains a plain frameless window and treats always-on-top as best-effort. This makes pinned mode depend on a compositor that supports `zwlr_layer_shell_v1`, prevents free window dragging, requires an app restart to switch modes, and rules out AppImage as a distribution target because its GTK hook forces the X11 backend.
