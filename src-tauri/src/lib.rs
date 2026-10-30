@@ -1,0 +1,104 @@
+//! Flipclock application shell: windowing, IPC and the tick thread.
+
+mod clock;
+mod commands;
+mod layer_shell;
+mod state;
+
+use std::env;
+
+use flipclock_core::mode::WindowMode;
+use tauri::{AppHandle, LogicalSize, Manager, WebviewWindow};
+
+use crate::state::{AppState, SETTINGS_FILE};
+
+pub fn run() {
+    tauri::Builder::default()
+        .plugin(tauri_plugin_single_instance::init(|app, _args, _cwd| {
+            focus_main(app);
+        }))
+        .invoke_handler(tauri::generate_handler![
+            commands::get_bootstrap,
+            commands::save_settings,
+            commands::set_fullscreen,
+            commands::quit,
+        ])
+        .setup(|app| {
+            setup(app);
+            Ok(())
+        })
+        .run(tauri::generate_context!())
+        .expect("error while running Flipclock");
+}
+
+fn setup(app: &mut tauri::App) {
+    let config_dir = app.path().app_config_dir().unwrap_or_else(|error| {
+        eprintln!("flipclock: cannot resolve the config directory: {error}; using a temp dir");
+        env::temp_dir().join("flipclock")
+    });
+
+    let layer_shell_available = layer_shell::is_supported() && !layer_shell_disabled();
+    let state = AppState::new(config_dir.join(SETTINGS_FILE), layer_shell_available);
+
+    let Some(window) = app.get_webview_window("main") else {
+        eprintln!("flipclock: the `main` window is missing");
+        app.manage(state);
+        return;
+    };
+
+    apply_startup_mode(&window, &state);
+
+    if let Err(error) = window.show() {
+        eprintln!("flipclock: cannot show the window: {error}");
+    }
+    if let Err(error) = window.set_always_on_top(true) {
+        eprintln!("flipclock: always-on-top is unavailable: {error}");
+    }
+
+    let handle = app.handle().clone();
+    app.manage(state);
+    clock::spawn(handle);
+}
+
+/// Sizes the window and turns it into a layer surface before it is shown.
+fn apply_startup_mode(window: &WebviewWindow, state: &AppState) {
+    let size = state.window_size();
+    if let Err(error) = window.set_size(LogicalSize::new(size.width, size.height)) {
+        eprintln!("flipclock: cannot size the window: {error}");
+    }
+
+    if state.window_mode() != WindowMode::Pinned {
+        return;
+    }
+
+    let pinned = match window.gtk_window() {
+        Ok(gtk_window) => {
+            let ready = layer_shell::setup(&gtk_window);
+            if ready {
+                layer_shell::apply_anchors(&gtk_window, state.settings().corner, false);
+            }
+            ready
+        }
+        Err(error) => {
+            eprintln!("flipclock: cannot reach the GTK window: {error}");
+            false
+        }
+    };
+
+    if !pinned {
+        eprintln!("flipclock: layer-shell setup failed; falling back to windowed mode");
+        state.force_windowed();
+    }
+}
+
+fn focus_main(app: &AppHandle) {
+    if let Some(window) = app.get_webview_window("main") {
+        let _ = window.show();
+        let _ = window.unminimize();
+        let _ = window.set_focus();
+    }
+}
+
+fn layer_shell_disabled() -> bool {
+    env::var("FLIPCLOCK_DISABLE_LAYER_SHELL").as_deref() == Ok("1")
+}

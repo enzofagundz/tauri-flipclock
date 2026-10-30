@@ -1,0 +1,27 @@
+[package]
+name = "flipclock"
+version = "0.1.0"
+description = "A desktop flip clock with a pinned layer-shell widget mode"
+edition = "2021"
+rust-version = "1.77"
+
+[lib]
+name = "flipclock_lib"
+crate-type = ["staticlib", "cdylib", "rlib"]
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+tauri = { version = "2", features = [] }
+tauri-plugin-single-instance = "2"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+chrono = { version = "0.4", default-features = false, features = ["clock", "std"] }
+flipclock-core = { path = "../crates/flipclock-core" }
+gtk = "0.18"
+gtk-layer-shell = { version = "0.8.2", features = ["v0_6"] }
+
+[dev-dependencies]
+tempfile = "3"
+tauri = { version = "2", features = ["test"] }
