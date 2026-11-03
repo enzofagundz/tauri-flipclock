@@ -32,6 +32,7 @@ pub struct Settings {
     pub show_seconds: bool,
     pub show_date: bool,
     pub pinned: bool,
+    pub show_now_playing: bool,
     pub corner: Corner,
     pub scale: Scale,
 }
@@ -39,11 +40,12 @@ pub struct Settings {
 impl Default for Settings {
     fn default() -> Self {
         Self {
-            version: 1,
+            version: 2,
             format_24h: true,
             show_seconds: false,
             show_date: false,
             pinned: false,
+            show_now_playing: true,
             corner: Corner::TopRight,
             scale: Scale::Medium,
         }
@@ -80,6 +82,7 @@ fn parse_lenient(json: &str) -> Option<Settings> {
         show_seconds: bool_from(&map, "show_seconds").unwrap_or(defaults.show_seconds),
         show_date: bool_from(&map, "show_date").unwrap_or(defaults.show_date),
         pinned: bool_from(&map, "pinned").unwrap_or(defaults.pinned),
+        show_now_playing: bool_from(&map, "show_now_playing").unwrap_or(defaults.show_now_playing),
         corner: enum_from(&map, "corner").unwrap_or(defaults.corner),
         scale: enum_from(&map, "scale").unwrap_or(defaults.scale),
     })
@@ -91,7 +94,9 @@ pub fn validate_settings_payload(json: &str) -> Result<Settings, SettingsError> 
     let value: Value = serde_json::from_str(json)
         .map_err(|error| SettingsError(format!("invalid settings JSON: {error}")))?;
     let Value::Object(map) = value else {
-        return Err(SettingsError("settings payload must be a JSON object".to_string()));
+        return Err(SettingsError(
+            "settings payload must be a JSON object".to_string(),
+        ));
     };
 
     let defaults = Settings::default();
@@ -110,6 +115,7 @@ pub fn validate_settings_payload(json: &str) -> Result<Settings, SettingsError> 
         show_seconds: strict_bool(&map, "show_seconds", defaults.show_seconds)?,
         show_date: strict_bool(&map, "show_date", defaults.show_date)?,
         pinned: strict_bool(&map, "pinned", defaults.pinned)?,
+        show_now_playing: strict_bool(&map, "show_now_playing", defaults.show_now_playing)?,
         corner: strict_enum(&map, "corner")?.unwrap_or(defaults.corner),
         scale: strict_enum(&map, "scale")?.unwrap_or(defaults.scale),
     })
@@ -137,7 +143,10 @@ fn enum_from<T: DeserializeOwned>(map: &Map<String, Value>, key: &str) -> Option
     serde_json::from_value(map.get(key)?.clone()).ok()
 }
 
-fn strict_enum<T: DeserializeOwned>(map: &Map<String, Value>, key: &str) -> Result<Option<T>, SettingsError> {
+fn strict_enum<T: DeserializeOwned>(
+    map: &Map<String, Value>,
+    key: &str,
+) -> Result<Option<T>, SettingsError> {
     match map.get(key) {
         None => Ok(None),
         Some(value) => {
@@ -154,12 +163,18 @@ pub fn load_settings(path: &Path) -> Settings {
         Ok(json) => match parse_lenient(&json) {
             Some(settings) => settings,
             None => {
-                eprintln!("flipclock: invalid settings at {}; using defaults", path.display());
+                eprintln!(
+                    "flipclock: invalid settings at {}; using defaults",
+                    path.display()
+                );
                 Settings::default()
             }
         },
         Err(error) => {
-            eprintln!("flipclock: cannot read settings at {}: {error}; using defaults", path.display());
+            eprintln!(
+                "flipclock: cannot read settings at {}: {error}; using defaults",
+                path.display()
+            );
             Settings::default()
         }
     }
@@ -168,7 +183,10 @@ pub fn load_settings(path: &Path) -> Settings {
 /// Writes settings through a temp file in the target directory and renames it
 /// into place, so a reader never sees a partial file.
 pub fn save_settings(path: &Path, settings: &Settings) -> io::Result<()> {
-    if let Some(parent) = path.parent().filter(|parent| !parent.as_os_str().is_empty()) {
+    if let Some(parent) = path
+        .parent()
+        .filter(|parent| !parent.as_os_str().is_empty())
+    {
         fs::create_dir_all(parent)?;
     }
 

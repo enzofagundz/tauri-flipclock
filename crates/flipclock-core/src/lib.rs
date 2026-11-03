@@ -6,6 +6,7 @@
 
 pub mod geometry;
 pub mod mode;
+pub mod now_playing;
 pub mod reading;
 pub mod settings;
 pub mod tick;
