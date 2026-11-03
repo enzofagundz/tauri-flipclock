@@ -1,6 +1,6 @@
 [package]
 name = "flipclock"
-version = "0.1.0"
+version = "0.2.0"
 description = "A desktop flip clock with a pinned layer-shell widget mode"
 edition = "2021"
 rust-version = "1.77"
@@ -19,6 +19,7 @@ serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 chrono = { version = "0.4", default-features = false, features = ["clock", "std"] }
 flipclock-core = { path = "../crates/flipclock-core" }
+dbus = "0.9"
 gtk = "0.18"
 gtk-layer-shell = { version = "0.8.2", features = ["v0_6"] }
 

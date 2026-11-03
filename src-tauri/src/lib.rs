@@ -3,6 +3,7 @@
 mod clock;
 mod commands;
 mod layer_shell;
+mod media;
 mod state;
 
 use std::env;
@@ -21,6 +22,8 @@ pub fn run() {
             commands::get_bootstrap,
             commands::save_settings,
             commands::set_fullscreen,
+            commands::get_artwork,
+            commands::media_command,
             commands::quit,
         ])
         .setup(|app| {
@@ -46,7 +49,20 @@ fn setup(app: &mut tauri::App) {
         return;
     };
 
-    apply_startup_mode(&window, &state);
+    app.manage(state);
+    let handle = app.handle().clone();
+
+    {
+        let state = handle.state::<AppState>();
+        apply_startup_mode(&window, &state);
+
+        // Populate the model and start the reader before the first frame, so the
+        // frontend never renders an empty card while the bus is read.
+        if state.settings().show_now_playing {
+            media::snapshot_once(&handle);
+            state.sync_media_worker(&handle, true);
+        }
+    }
 
     if let Err(error) = window.show() {
         eprintln!("flipclock: cannot show the window: {error}");
@@ -55,8 +71,6 @@ fn setup(app: &mut tauri::App) {
         eprintln!("flipclock: always-on-top is unavailable: {error}");
     }
 
-    let handle = app.handle().clone();
-    app.manage(state);
     clock::spawn(handle);
 }
 

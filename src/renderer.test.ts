@@ -15,7 +15,7 @@ function reading(overrides: Partial<Reading> = {}): Reading {
 }
 
 function mount(): HTMLElement {
-  document.body.innerHTML = '<main id="clock" class="clock" data-scale="medium" role="img"></main>';
+  document.body.innerHTML = '<main id="clock" class="clock" data-scale="medium" role="group"></main>';
   const root = document.getElementById("clock");
   if (root === null) {
     throw new Error("clock root is missing");
@@ -155,6 +155,15 @@ describe("renderReading", () => {
     expect(face(root, "minute-ones", "upper")).toBe("2");
     expect(face(root, "minute-ones", "lower")).toBe("2");
     expect(leaf(root, "minute-ones", "upper")).toBe("");
+  });
+
+  it("appends the now playing summary to the clock label", () => {
+    const root = mount();
+    renderReading(root, reading(), { nowPlaying: "CHROME: Everything In Its Right Place" });
+
+    expect(root.getAttribute("aria-label")).toBe(
+      "09:41, CHROME: Everything In Its Right Place",
+    );
   });
 
   it("rolls the minute over while the seconds region is hidden", () => {

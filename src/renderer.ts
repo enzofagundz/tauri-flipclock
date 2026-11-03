@@ -4,6 +4,7 @@ export interface RenderOptions {
   reducedMotion?: boolean;
   showSeconds?: boolean;
   showDate?: boolean;
+  nowPlaying?: string;
 }
 
 const FLIP_DURATION_MS = 450;
@@ -230,7 +231,9 @@ export function renderReading(
     : `${reading.hour}:${reading.minute}`;
   const suffix = reading.meridiem === null ? "" : ` ${reading.meridiem}`;
   const date = showDate ? `, ${reading.date}` : "";
-  const label = `${time}${suffix}${date}`;
+  const media = options.nowPlaying?.trim() ?? "";
+  const nowPlaying = media === "" ? "" : `, ${media}`;
+  const label = `${time}${suffix}${date}${nowPlaying}`;
   if (root.getAttribute("aria-label") !== label) {
     root.setAttribute("aria-label", label);
   }

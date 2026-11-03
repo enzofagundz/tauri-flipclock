@@ -30,7 +30,7 @@ const SAVE_ERROR_NOTICE = "Não foi possível salvar as configurações.";
 const LAYER_SHELL_NOTICE =
   "O modo fixado não está disponível neste ambiente. O relógio abre em modo janela.";
 
-type ToggleSetting = "format_24h" | "show_seconds" | "show_date" | "pinned";
+type ToggleSetting = "format_24h" | "show_seconds" | "show_date" | "show_now_playing" | "pinned";
 
 interface ToggleField {
   field: HTMLLabelElement;
@@ -134,7 +134,16 @@ export function createSettingsPanel(options: SettingsPanelOptions): SettingsPane
   const formatField = toggleField("Formato de 24 horas", "format_24h");
   const secondsField = toggleField("Mostrar segundos", "show_seconds");
   const dateField = toggleField("Mostrar data", "show_date");
+  const nowPlayingField = toggleField("Mostrar o que está tocando", "show_now_playing");
   const pinnedField = toggleField("Fixar na tela", "pinned");
+
+  const nowPlayingHint = document.createElement("span");
+  nowPlayingHint.className = "field__hint";
+  nowPlayingHint.textContent = "Só aparece em tela cheia.";
+
+  const nowPlayingGroup = document.createElement("div");
+  nowPlayingGroup.className = "settings__group";
+  nowPlayingGroup.append(nowPlayingField.field, nowPlayingHint);
 
   const layerNotice = notice();
   layerNotice.textContent = LAYER_SHELL_NOTICE;
@@ -162,6 +171,7 @@ export function createSettingsPanel(options: SettingsPanelOptions): SettingsPane
     formatField.field,
     secondsField.field,
     dateField.field,
+    nowPlayingGroup,
     pinnedFieldGroup,
     cornerGroup.fieldset,
     scaleGroup.fieldset,
@@ -191,6 +201,7 @@ export function createSettingsPanel(options: SettingsPanelOptions): SettingsPane
     formatField.input.checked = settings.format_24h;
     secondsField.input.checked = settings.show_seconds;
     dateField.input.checked = settings.show_date;
+    nowPlayingField.input.checked = settings.show_now_playing;
     pinnedField.input.checked = settings.pinned;
 
     for (const input of cornerGroup.inputs) {
@@ -252,6 +263,12 @@ export function createSettingsPanel(options: SettingsPanelOptions): SettingsPane
   dateField.input.addEventListener("change", () => {
     if (current !== null) {
       commit({ ...current, show_date: dateField.input.checked });
+    }
+  });
+
+  nowPlayingField.input.addEventListener("change", () => {
+    if (current !== null) {
+      commit({ ...current, show_now_playing: nowPlayingField.input.checked });
     }
   });
 

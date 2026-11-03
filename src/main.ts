@@ -1,9 +1,19 @@
-import { getBootstrap, onTick, quit as quitApp, saveSettings, setFullscreen } from "./api";
+import {
+  getArtwork,
+  getBootstrap,
+  mediaCommand,
+  onNowPlaying,
+  onTick,
+  quit as quitApp,
+  saveSettings,
+  setFullscreen,
+} from "./api";
 import { createContextMenu } from "./context-menu";
 import { prefersReducedMotion } from "./motion";
 import { renderReading } from "./renderer";
+import { createNowPlayingCard, type NowPlayingCard } from "./now-playing";
 import { createSettingsPanel } from "./settings-panel";
-import type { Reading, SaveResult, Settings } from "./types";
+import type { NowPlaying, Reading, SaveResult, Settings } from "./types";
 
 function requireClock(): HTMLElement {
   const clock = document.querySelector<HTMLElement>("#clock");
@@ -19,16 +29,36 @@ async function start(): Promise<void> {
 
   let settings: Settings = bootstrap.settings;
   let reading: Reading = bootstrap.reading;
+  let nowPlaying: NowPlaying | null = bootstrap.now_playing;
   let fullscreen = false;
+  let card: NowPlayingCard | null = null;
 
   clock.dataset.scale = settings.scale;
+
+  const nowPlayingLabel = (): string | undefined => {
+    if (!fullscreen || !settings.show_now_playing || nowPlaying === null) {
+      return undefined;
+    }
+    return `${nowPlaying.label}: ${nowPlaying.title}`;
+  };
 
   const render = (): void => {
     renderReading(clock, reading, {
       showSeconds: settings.show_seconds,
       showDate: settings.show_date,
       reducedMotion: prefersReducedMotion(),
+      nowPlaying: nowPlayingLabel(),
     });
+  };
+
+  const updateCard = (): void => {
+    card?.update({
+      model: nowPlaying,
+      fullscreen,
+      enabled: settings.show_now_playing,
+      reducedMotion: prefersReducedMotion(),
+    });
+    render();
   };
 
   let menu: ReturnType<typeof createContextMenu> | null = null;
@@ -39,6 +69,7 @@ async function start(): Promise<void> {
     clock.dataset.scale = settings.scale;
     menu?.setPinned(settings.pinned);
     render();
+    updateCard();
     return result;
   };
 
@@ -77,6 +108,7 @@ async function start(): Promise<void> {
     try {
       fullscreen = await setFullscreen(enabled);
       menu?.setFullscreen(fullscreen);
+      updateCard();
     } catch (error) {
       console.error("flipclock: cannot change fullscreen", error);
     }
@@ -127,6 +159,32 @@ async function start(): Promise<void> {
   });
 
   render();
+
+  let commandFailed = false;
+  card = createNowPlayingCard(clock, {
+    loadArtwork: getArtwork,
+    onCommand: (command, player) => {
+      void mediaCommand(player, command).then(
+        () => {
+          commandFailed = false;
+        },
+        (error: unknown) => {
+          if (commandFailed) {
+            return;
+          }
+          commandFailed = true;
+          console.error("flipclock: media command failed", error);
+        },
+      );
+    },
+  });
+  updateCard();
+
+  await onNowPlaying((next) => {
+    nowPlaying = next;
+    updateCard();
+  });
+
   await onTick((next) => {
     reading = next;
     render();

@@ -7,12 +7,16 @@ use std::sync::{Mutex, MutexGuard};
 use chrono::{DateTime, Local};
 use flipclock_core::geometry::{window_size, Size};
 use flipclock_core::mode::{resolve_window_mode, WindowMode};
+use flipclock_core::now_playing::NowPlaying;
 use flipclock_core::reading::{format_reading, Reading};
 use flipclock_core::settings::{
     load_settings, save_settings as write_settings, validate_settings_payload, Settings,
 };
 use serde::Serialize;
 use serde_json::Value;
+use tauri::{AppHandle, Emitter, Runtime};
+
+use crate::media::{self, worker_action, ArtworkResource, MediaWorker, WorkerAction};
 
 /// Name of the settings file inside the app config directory.
 pub const SETTINGS_FILE: &str = "settings.json";
@@ -23,6 +27,7 @@ pub struct Bootstrap {
     pub reading: Reading,
     pub layer_shell_available: bool,
     pub window_mode: WindowMode,
+    pub now_playing: Option<NowPlaying>,
 }
 
 #[derive(Debug, Serialize)]
@@ -37,6 +42,9 @@ pub struct AppState {
     fullscreen: AtomicBool,
     layer_shell_available: AtomicBool,
     window_mode: Mutex<WindowMode>,
+    now_playing: Mutex<Option<NowPlaying>>,
+    artwork: Mutex<Option<ArtworkResource>>,
+    media: Mutex<Option<MediaWorker>>,
 }
 
 impl AppState {
@@ -51,6 +59,9 @@ impl AppState {
             fullscreen: AtomicBool::new(false),
             layer_shell_available: AtomicBool::new(layer_shell_available),
             window_mode: Mutex::new(window_mode),
+            now_playing: Mutex::new(None),
+            artwork: Mutex::new(None),
+            media: Mutex::new(None),
         }
     }
 
@@ -62,6 +73,24 @@ impl AppState {
 
     fn lock_mode(&self) -> MutexGuard<'_, WindowMode> {
         self.window_mode
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+    }
+
+    fn lock_now_playing(&self) -> MutexGuard<'_, Option<NowPlaying>> {
+        self.now_playing
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+    }
+
+    fn lock_artwork(&self) -> MutexGuard<'_, Option<ArtworkResource>> {
+        self.artwork
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+    }
+
+    fn lock_media(&self) -> MutexGuard<'_, Option<MediaWorker>> {
+        self.media
             .lock()
             .unwrap_or_else(|poisoned| poisoned.into_inner())
     }
@@ -92,11 +121,68 @@ impl AppState {
     /// Payload for the first render, with the initial reading snapped.
     pub fn bootstrap(&self, now: DateTime<Local>) -> Bootstrap {
         let settings = self.settings();
+        let now_playing = if settings.show_now_playing {
+            self.now_playing()
+        } else {
+            None
+        };
         Bootstrap {
             reading: format_reading(now, &settings, false),
             settings,
             layer_shell_available: self.layer_shell_available.load(Ordering::Acquire),
             window_mode: self.window_mode(),
+            now_playing,
+        }
+    }
+
+    pub fn now_playing(&self) -> Option<NowPlaying> {
+        self.lock_now_playing().clone()
+    }
+
+    pub fn artwork(&self) -> Option<ArtworkResource> {
+        self.lock_artwork().clone()
+    }
+
+    /// Stores the model and artwork, emitting only when the visible model changes.
+    pub fn publish_now_playing<R: Runtime>(
+        &self,
+        app: &AppHandle<R>,
+        model: Option<NowPlaying>,
+        artwork: Option<ArtworkResource>,
+    ) {
+        let changed = self.now_playing() != model;
+        *self.lock_now_playing() = model.clone();
+        *self.lock_artwork() = artwork;
+
+        if changed {
+            if let Err(error) = app.emit(media::UPDATE_EVENT, model) {
+                eprintln!("flipclock: cannot emit {}: {error}", media::UPDATE_EVENT);
+            }
+        }
+    }
+
+    /// Drops the cached model and artwork without notifying the frontend.
+    pub fn clear_now_playing(&self) {
+        *self.lock_now_playing() = None;
+        *self.lock_artwork() = None;
+    }
+
+    /// Starts or stops the D-Bus reader to match the now-playing toggle.
+    pub fn sync_media_worker<R: Runtime>(&self, app: &AppHandle<R>, enabled: bool) {
+        let running = self.lock_media().is_some();
+        match worker_action(enabled, running) {
+            WorkerAction::Start => match media::start(app.clone()) {
+                Some(worker) => *self.lock_media() = Some(worker),
+                None => eprintln!("flipclock: cannot start the now-playing worker"),
+            },
+            WorkerAction::Stop => {
+                let worker = self.lock_media().take();
+                if let Some(worker) = worker {
+                    worker.stop();
+                }
+                self.clear_now_playing();
+            }
+            WorkerAction::Keep => {}
         }
     }
 
@@ -162,6 +248,7 @@ mod tests {
             keys,
             [
                 "layer_shell_available",
+                "now_playing",
                 "reading",
                 "settings",
                 "window_mode"
@@ -169,6 +256,50 @@ mod tests {
         );
         assert_eq!(value["window_mode"], json!("windowed"));
         assert_eq!(value["reading"]["animate"], json!(false));
+        assert_eq!(value["now_playing"], json!(null));
+    }
+
+    fn sample_model() -> NowPlaying {
+        NowPlaying {
+            player: "org.mpris.MediaPlayer2.firefox.instance1".to_string(),
+            label: "FIREFOX".to_string(),
+            title: "Track".to_string(),
+            artist: Some("Artist".to_string()),
+            album: None,
+            artwork: None,
+            playing: true,
+            can_play_pause: true,
+            can_go_previous: false,
+            can_go_next: true,
+            progress: None,
+        }
+    }
+
+    #[test]
+    fn bootstrap_carries_the_cached_now_playing_model() {
+        let (_dir, state) = temp_state(true);
+        *state.now_playing.lock().unwrap() = Some(sample_model());
+
+        let bootstrap = state.bootstrap(Local::now());
+
+        assert_eq!(
+            bootstrap
+                .now_playing
+                .as_ref()
+                .map(|model| model.title.as_str()),
+            Some("Track")
+        );
+    }
+
+    #[test]
+    fn bootstrap_hides_now_playing_when_the_toggle_is_off() {
+        let (_dir, state) = temp_state(true);
+        *state.now_playing.lock().unwrap() = Some(sample_model());
+
+        state.save(&json!({ "show_now_playing": false })).unwrap();
+
+        assert!(state.bootstrap(Local::now()).now_playing.is_none());
+        assert_eq!(state.now_playing().unwrap().title, "Track");
     }
 
     #[test]

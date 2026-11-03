@@ -1,10 +1,13 @@
 //! IPC commands exposed to the webview.
 
 use flipclock_core::mode::WindowMode;
+use flipclock_core::now_playing::is_browser_player;
 use flipclock_core::settings::Corner;
+use serde::Deserialize;
 use tauri::{AppHandle, LogicalSize, Runtime, State, WebviewWindow};
 
 use crate::layer_shell;
+use crate::media;
 use crate::state::{AppState, Bootstrap, SaveResult};
 
 #[tauri::command]
@@ -14,12 +17,14 @@ pub fn get_bootstrap(state: State<'_, AppState>) -> Result<Bootstrap, String> {
 
 #[tauri::command]
 pub fn save_settings<R: Runtime>(
+    app: AppHandle<R>,
     window: WebviewWindow<R>,
     state: State<'_, AppState>,
     settings: serde_json::Value,
 ) -> Result<SaveResult, String> {
     let previous = state.settings();
     let result = state.save(&settings)?;
+    state.sync_media_worker(&app, result.settings.show_now_playing);
 
     let display_changed = previous.scale != result.settings.scale
         || previous.show_seconds != result.settings.show_seconds
@@ -40,6 +45,57 @@ pub fn save_settings<R: Runtime>(
     }
 
     Ok(result)
+}
+
+/// Returns the cached artwork bytes for the selected player.
+///
+/// The allowlist is checked first and the cached path is re-validated, so a
+/// stale or hostile path cannot be used to read anything outside an artwork
+/// file the reader already accepted.
+#[tauri::command]
+pub fn get_artwork(
+    state: State<'_, AppState>,
+    player: String,
+) -> Result<tauri::ipc::Response, String> {
+    if !is_browser_player(&player) {
+        return Err(format!("`{player}` is not an allowlisted browser"));
+    }
+
+    let resource = state
+        .artwork()
+        .filter(|resource| resource.player == player)
+        .ok_or_else(|| format!("no cached artwork for `{player}`"))?;
+
+    let (mime, bytes) = media::read_artwork(&resource.path)?;
+    if mime != resource.mime {
+        return Err("cached artwork type changed on disk".to_string());
+    }
+
+    Ok(tauri::ipc::Response::new(bytes))
+}
+
+/// Transport actions the now-playing card can send to the player.
+#[derive(Debug, Clone, Copy, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum MediaCommand {
+    PlayPause,
+    Previous,
+    Next,
+}
+
+impl MediaCommand {
+    fn member(self) -> &'static str {
+        match self {
+            MediaCommand::PlayPause => "PlayPause",
+            MediaCommand::Previous => "Previous",
+            MediaCommand::Next => "Next",
+        }
+    }
+}
+
+#[tauri::command]
+pub fn media_command(player: String, command: MediaCommand) -> Result<(), String> {
+    media::send_command(&player, command.member())
 }
 
 #[tauri::command]
@@ -190,7 +246,9 @@ mod tests {
             .invoke_handler(tauri::generate_handler![
                 get_bootstrap,
                 save_settings,
-                set_fullscreen
+                set_fullscreen,
+                get_artwork,
+                media_command
             ])
             .build(tauri::generate_context!())
             .unwrap();
@@ -263,6 +321,7 @@ mod tests {
         assert!(value["reading"]["hour"].is_string());
         assert_eq!(value["layer_shell_available"], json!(true));
         assert_eq!(value["window_mode"], json!("windowed"));
+        assert_eq!(value["now_playing"], json!(null));
     }
 
     #[test]
@@ -274,6 +333,7 @@ mod tests {
             "show_seconds": true,
             "show_date": true,
             "pinned": false,
+            "show_now_playing": false,
             "corner": "bottom_left",
             "scale": "large",
         });
@@ -310,5 +370,56 @@ mod tests {
 
         let value = invoke(&app, "set_fullscreen", json!({ "enabled": false })).unwrap();
         assert_eq!(value, json!(false));
+    }
+
+    #[test]
+    fn get_artwork_rejects_a_player_outside_the_allowlist() {
+        let (_dir, app) = mock_app();
+        let error = invoke(
+            &app,
+            "get_artwork",
+            json!({ "player": "org.mpris.MediaPlayer2.spotify" }),
+        )
+        .unwrap_err();
+
+        assert!(
+            error.as_str().unwrap_or_default().contains("allowlisted"),
+            "unexpected error: {error}"
+        );
+    }
+
+    #[test]
+    fn get_artwork_rejects_an_allowlisted_player_without_cached_artwork() {
+        let (_dir, app) = mock_app();
+        let error = invoke(
+            &app,
+            "get_artwork",
+            json!({ "player": "org.mpris.MediaPlayer2.firefox.instance1" }),
+        )
+        .unwrap_err();
+
+        assert!(
+            error
+                .as_str()
+                .unwrap_or_default()
+                .contains("no cached artwork"),
+            "unexpected error: {error}"
+        );
+    }
+
+    #[test]
+    fn media_command_rejects_a_player_outside_the_allowlist() {
+        let (_dir, app) = mock_app();
+        let error = invoke(
+            &app,
+            "media_command",
+            json!({ "player": "org.mpris.MediaPlayer2.spotify", "command": "play_pause" }),
+        )
+        .unwrap_err();
+
+        assert!(
+            error.as_str().unwrap_or_default().contains("allowlisted"),
+            "unexpected error: {error}"
+        );
     }
 }

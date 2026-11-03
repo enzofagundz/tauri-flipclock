@@ -9,6 +9,7 @@ function settings(overrides: Partial<Settings> = {}): Settings {
     show_seconds: false,
     show_date: false,
     pinned: false,
+    show_now_playing: true,
     corner: "top_right",
     scale: "medium",
     ...overrides,
@@ -102,6 +103,34 @@ describe("createSettingsPanel", () => {
     expect(onChange).toHaveBeenCalledTimes(2);
     expect(onChange.mock.calls[0]?.[0]).toMatchObject({ show_seconds: true });
     expect(onChange.mock.calls[1]?.[0]).toMatchObject({ show_seconds: true, show_date: true });
+  });
+
+  it("reflects and saves the now playing toggle with its fullscreen note", async () => {
+    const onChange = save();
+    const panel = createSettingsPanel({ layerShellAvailable: true, onChange });
+    panel.open(settings({ show_now_playing: false }));
+
+    const input = toggle("show_now_playing");
+    expect(input.checked).toBe(false);
+
+    const hint = Array.from(document.querySelectorAll<HTMLElement>(".field__hint")).find(
+      (node) => node.textContent?.includes("tela cheia"),
+    );
+    expect(hint?.textContent).toBe("Só aparece em tela cheia.");
+    expect(hint?.hidden).toBe(false);
+
+    input.checked = true;
+    pick(input);
+    await flush();
+
+    expect(onChange.mock.calls[0]?.[0]).toMatchObject({ show_now_playing: true });
+  });
+
+  it("opens with now playing enabled by default", () => {
+    const panel = createSettingsPanel({ layerShellAvailable: true, onChange: save() });
+    panel.open(settings());
+
+    expect(toggle("show_now_playing").checked).toBe(true);
   });
 
   it("saves the anchor corner and the scale preset", async () => {
