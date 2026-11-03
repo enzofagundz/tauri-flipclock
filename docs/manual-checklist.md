@@ -27,10 +27,28 @@ Run on Fedora 44 with COSMIC 1.10 on Wayland, after building the RPM or with `np
 - [ ] The context menu and settings panel remain reachable in fullscreen.
 - [ ] A second launch focuses the existing clock and leaves only one instance running.
 
+## Now playing (fullscreen)
+
+- [ ] Play a track in Chrome and enter fullscreen: the card appears under the date with `CHROME`, the title and an artist • album line. Leave fullscreen: it disappears immediately. Repeat in Windowed and Pinned mode and confirm it never appears.
+- [ ] Play a track with no album, and one with no artist: no empty separator or blank line is left behind.
+- [ ] Play in Firefox and Zen, then enter fullscreen: the card shows cover, label, title and artist, with no progress row at all.
+- [ ] Play in Chrome and Brave: the bar advances once per second with elapsed and total timestamps. Pause: the bar and both timestamps freeze, and the card stays. Resume: it continues from the reported position.
+- [ ] Play a live stream without a duration: no progress row and no invented total.
+- [ ] On a playlist, use **Faixa anterior** and **Próxima faixa** from the card; they act on the browser. On a single tab, confirm **Próxima faixa** and **Faixa anterior** are absent.
+- [ ] Use play/pause from the card: the icon follows the browser's reported state, not an optimistic toggle. Kill the browser mid-command: the failure is logged once and the card does not change.
+- [ ] Tab through the card in fullscreen: all visible controls are reachable with a visible focus ring. `Esc` still leaves fullscreen; the context menu and settings panel still work.
+- [ ] With two browsers open, start playback in one: it wins the card. Pause both: the most recently active one stays. Close the last browser: the card disappears.
+- [ ] Play Spotify, Rhythmbox or mpv only, with every browser closed: no card appears, even in fullscreen.
+- [ ] A track with a local cover shows it; a track without cover shows the placeholder, never a broken-image icon. Change tracks: the cover is replaced. A remote `http(s)` cover loads.
+- [ ] Enter fullscreen while a track is already playing: the first frame is already populated, not blank.
+- [ ] Turn **Mostrar o que está tocando** off: the card hides immediately. Run `busctl --user monitor` and confirm the app no longer reads MPRIS or polls position; no `Properties.Get`/`GetAll` calls for `org.mpris.MediaPlayer2` appear while it is off.
+- [ ] Turn the toggle back on: the card repopulates without restarting the app.
+- [ ] Restart with the toggle off: it stays off. Delete the key from `settings.json`, restart: the feature is on again.
+
 ## Packaging
 
 - [ ] `npm test`, both `cargo test` commands, and `npm run tauri build` pass.
-- [ ] `sudo dnf install ./src-tauri/target/release/bundle/rpm/Flipclock-0.1.0-1.x86_64.rpm` adds **Flipclock** to the application menu.
+- [ ] `sudo dnf install ./src-tauri/target/release/bundle/rpm/Flipclock-0.2.0-1.x86_64.rpm` adds **Flipclock** to the application menu.
 - [ ] Launching from the menu starts the app with the saved settings.
 - [ ] `sudo dnf remove flipclock` removes the app, desktop entry, icons, and license; `~/.config/io.github.enzofagundz.flipclock/` may remain.
 - [ ] No AppImage, deb, or Flatpak artifact exists under `src-tauri/target/release/bundle/`.
